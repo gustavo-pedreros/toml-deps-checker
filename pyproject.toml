@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gradle-deps-monitor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Freeze-time technical due-diligence report for Android / Gradle projects"
 readme = "README.md"
 requires-python = ">=3.11"
