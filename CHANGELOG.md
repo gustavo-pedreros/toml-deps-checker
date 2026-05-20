@@ -8,73 +8,139 @@ be assigned once a stable public API is established.
 
 ---
 
-## [Unreleased]
+## [0.2.0] — 2026-05-19
+
+Second release of `gradle-deps-monitor`. Two themes — one additive
+feature phase, one breaking default change that pre-1.0 SemVer
+permits without a new MAJOR.
+
+### Highlights
+
+- **Phase 8 — Analytics & insights v1**: the first Claude Code
+  skill in the project, `/analyze-freeze`, backed by a DuckDB-based
+  canonical query library that consumes the RFC-0017 CSVs and
+  produces a Markdown insight summary. Eight canonical queries
+  cover every CSV dimension, including the compound
+  "duplicate-with-CVE" exposure that the narrative `freeze.md`
+  doesn't surface. Analytics dependencies are opt-in via a new
+  `[analytics]` extra (`pip install -e ".[analytics]"`); the
+  default install path is untouched.
+- **Slack output is now opt-in** (BREAKING default change).
+  `gradle-deps-monitor check` and `diff` no longer write
+  `freeze-slack.json` / `freeze-diff-slack.json` by default —
+  pass `--slack` (or set `[output] slack = true` in
+  `gradle-deps-monitor.toml`) to re-enable. See RFC-0034
+  for rationale and migration.
+- **Architecture documented**: ADR-0010 pins the analytics stack
+  (DuckDB query layer; `tabulate` as the only presentation library;
+  no pandas in v1); RFC-0033 + RFC-0034 land as the two feature
+  RFCs for this release.
+
+### Added
+
+#### Analytics & the `/analyze-freeze` skill (RFC-0033, ADR-0010)
+
+- **`/analyze-freeze <report-dir>`** — first project-level Claude
+  Code skill. Lives at `.claude/skills/analyze-freeze/SKILL.md`.
+  Loads the two RFC-0017 CSVs into in-memory DuckDB tables, runs
+  every canonical query in `tools/analytics/queries/` in numeric
+  order, and emits a Markdown summary with one `## <Title>`
+  section per query.
+- **Canonical query library** at `tools/analytics/queries/`. Eight
+  queries cover every distinct CSV dimension: `top_risk`,
+  `drift_by_severity`, `compound_security_duplicates` (the
+  RFC-0017 issue-#13 compound exposure), `unstable_prerelease_in_prod`,
+  `inactive_or_unhealthy`, `license_risk`,
+  `finding_severity_breakdown`, `bom_coverage`. `queries/INDEX.md`
+  codifies what counts as "canonical" and how to add a new one.
+- **Analytics runner** at `tools/analytics/runner.py`. Verifies
+  CSV headers against the RFC-0017 contract (fail-fast on drift)
+  before loading. Detects scanner-not-run cases (e.g. `--risk-score`
+  off, no CVE credentials) and surfaces them as actionable hints
+  instead of generic "no rows" footers.
+- **`[analytics]` optional extra** in `pyproject.toml`
+  (`duckdb>=1.1,<2.0`, `tabulate>=0.9`). Install via
+  `pip install -e ".[analytics]"`. Default install path remains
+  unchanged; users who only run `gradle-deps-monitor check` pay
+  no extra cost.
+- **`Tip: run /analyze-freeze …` line** in the post-`check`
+  console summary, shown after the file listing when both CSVs
+  land (the default).
+- **User Guide chapter**
+  [`docs/user-guide/analyzing-a-freeze-report.md`](docs/user-guide/analyzing-a-freeze-report.md):
+  skill-vs-sub-agent primer (the first skill in the project),
+  worked example against the bundled Sunflower freeze, and the
+  procedure for adding a new canonical query.
+- **CONTRIBUTING reading order** gains a "Skills" step pointing
+  at `.claude/skills/` with cross-links to ADR-0010 and the new
+  User Guide chapter.
+
+#### Output configuration (RFC-0034)
+
+- **`--slack` / `--no-slack` flag** on both `check` and `diff`.
+  Tri-state Typer option: `--slack` enables, `--no-slack`
+  disables, unset defers to the config file.
+- **`[output]` config section** in `gradle-deps-monitor.toml`.
+  Previously reserved-but-ignored; now consumed and validated.
+  Today's only knob is `slack = true|false`; future opt-in
+  writers (e.g. the planned RFC-0010 HTML export) follow the
+  same per-writer boolean pattern.
+
+#### Decisions and design docs
+
+- [ADR-0010](docs/adr/0010-analytics-stack-duckdb.md) — Analytics
+  stack: DuckDB as the query layer for downstream insights;
+  `tabulate` as the only presentation library (no pandas in v1).
+  Pandas reconsideration is explicitly deferred to RFC-0010
+  (HTML export) time, where build-time data shaping may earn it
+  back. Documents the empirical pandas-3.x finding that pivoted
+  the original stack design mid-tracer.
+- [RFC-0033](docs/proposals/0033-analyze-freeze-skill.md) —
+  `/analyze-freeze` skill + canonical query library.
+- [RFC-0034](docs/proposals/0034-output-slack-opt-in.md) — Slack
+  output becomes opt-in.
 
 ### Changed
 
-- **BREAKING: Slack output is now opt-in (RFC-0034).** `gradle-deps-monitor
-  check` no longer writes `freeze-slack.json` by default; the default
-  output set is 4 files (`freeze.md`, `freeze.json`,
-  `freeze-inventory.csv`, `freeze-findings.csv`). Similarly,
-  `gradle-deps-monitor diff` no longer writes `freeze-diff-slack.json`
-  by default; the default is 2 files (`freeze-diff.md`,
-  `freeze-diff.json`). Pre-1.0 SemVer permits this default change.
-  Migration — for CI pipelines that POST the Slack file to a webhook,
-  add the flag:
+- **BREAKING — Slack output is opt-in.** `gradle-deps-monitor check`
+  default output set drops from 5 files to 4 (no `freeze-slack.json`);
+  `diff` drops from 3 to 2 (no `freeze-diff-slack.json`). The four
+  load-bearing outputs (`freeze.md` canonical for humans;
+  `freeze.json` consumed by `diff`; the two CSVs consumed by
+  `/analyze-freeze`) are unchanged. **Migration:**
   ```bash
   gradle-deps-monitor check ./gradle --slack
   gradle-deps-monitor diff old.json new.json --slack
   ```
-  or set in `gradle-deps-monitor.toml`:
+  or:
   ```toml
   [output]
   slack = true
   ```
-  See [RFC-0034](docs/proposals/0034-output-slack-opt-in.md).
+  Pre-1.0 SemVer (0.x.y) permits this default change without a
+  MAJOR bump. See [RFC-0034](docs/proposals/0034-output-slack-opt-in.md).
+- **Phase 8 follow-ups header** added to `docs/roadmap.md` for
+  small breaking-default changes between Phase 8 v1 and v0.2.0.
+  RFC-0034 was the only entry; the cluster ships closed in this
+  release.
 
-### Added
+### Notes for upgraders from v0.1.0
 
-- [RFC-0034](docs/proposals/0034-output-slack-opt-in.md) — Slack
-  output becomes opt-in: `--slack` / `--no-slack` flag on both
-  `check` and `diff`, plus a new `[output] slack` knob in
-  `gradle-deps-monitor.toml`. The `[output]` section in the config
-  file is no longer "reserved-but-ignored" — it is now consumed
-  and validated.
-- **Phase 8 — Analytics & insights v1 closed (2026-05-19).** First
-  project-level Claude Code skill: `/analyze-freeze <report-dir>`
-  runs a DuckDB-backed canonical query library against the RFC-0017
-  CSVs (`freeze-inventory.csv` + `freeze-findings.csv`) and emits a
-  Markdown insight summary. Ships with 8 canonical queries covering
-  every distinct CSV dimension: `top_risk`, `drift_by_severity`,
-  `compound_security_duplicates` (the RFC-0017 issue-#13 exposure),
-  `unstable_prerelease_in_prod`, `inactive_or_unhealthy`,
-  `license_risk`, `finding_severity_breakdown`, and `bom_coverage`.
-  Analytics deps (DuckDB + tabulate) are opt-in via the new
-  `[analytics]` extra (`pip install -e ".[analytics]"`) — the
-  default install path is untouched. Architecture pinned by
-  [ADR-0010](docs/adr/0010-analytics-stack-duckdb.md) (DuckDB query
-  layer; tabulate-only render; analytics code in `tools/analytics/`,
-  outside the 6 Clean Architecture layers). See
-  [RFC-0033](docs/proposals/0033-analyze-freeze-skill.md).
-- **Scanner-not-run hints.** When a canonical query depends on an
-  opt-in scanner that wasn't run for the freeze (e.g. `--risk-score`
-  off, or `GITHUB_TOKEN` unset for the CVE check), the relevant
-  section now renders a "Scanner not run for this dimension. Re-run
-  `gradle-deps-monitor check --risk-score` to populate this section."
-  hint instead of a generic "no rows" footer.
-- **`Tip:` line in the post-`check` console summary**, pointing
-  users at `/analyze-freeze <out-dir>` when both CSVs are written.
-- **User Guide chapter** —
-  [`docs/user-guide/analyzing-a-freeze-report.md`](docs/user-guide/analyzing-a-freeze-report.md):
-  skill-vs-sub-agent primer, worked example against the Sunflower
-  freeze, instructions for adding a new canonical query.
-- [ADR-0010](docs/adr/0010-analytics-stack-duckdb.md) — Analytics
-  stack: DuckDB as the query layer for downstream insights;
-  tabulate as the only presentation library (no pandas in v1);
-  pandas reconsideration deferred to RFC-0010 (HTML export) if
-  build-time data shaping ever earns it back.
-- [RFC-0033](docs/proposals/0033-analyze-freeze-skill.md) —
-  `/analyze-freeze` skill + canonical query library design.
+If you POST `freeze-slack.json` to a Slack incoming webhook from
+CI, add `--slack` to your `gradle-deps-monitor check` invocation
+(or set `[output] slack = true` in `gradle-deps-monitor.toml`).
+Same shape for `diff`. Nothing else changed by default — the
+canonical Markdown / JSON / CSV outputs are unaffected.
+
+To use the new `/analyze-freeze` skill, install the optional
+analytics extra:
+
+```bash
+pip install -e ".[analytics]"
+```
+
+Then invoke `/analyze-freeze <report-dir>` from Claude Code, or
+call `python tools/analytics/runner.py --dir <report-dir>` directly.
 
 ---
 
